@@ -25,6 +25,15 @@
 #include "Materials/Material.h"
 #include "Net/UnrealNetwork.h"
 
+// Iris
+#include "Serializers/SerializerHelpers.h"
+#include "Iris/Serialization/ObjectNetSerializer.h"
+#include "Iris/Core/NetObjectReference.h"
+#include "Iris/Serialization/NetSerializerDelegates.h"
+#include "Iris/Serialization/NetSerializers.h"
+#include "Iris/ReplicationState/PropertyNetSerializerInfoRegistry.h"
+#include "Iris/ReplicationState/ReplicationStateDescriptorBuilder.h"
+
 namespace RLE_Funcs
 {
 	enum RLE_Flags
@@ -1813,3 +1822,155 @@ bool FRenderManagerOperation::NetSerialize(FArchive& Ar, class UPackageMap* Map,
 
 	return bOutSuccess;
 }
+
+// SERIALIZER SETUP FOR IRIS
+/*
+namespace UE::Net
+{
+
+	// -----------------------------------------------------------------------------
+	// Iris serializer for FBPVRReplicatedTextureStore
+	// -----------------------------------------------------------------------------
+	struct FBPVRReplicatedTextureStoreNetSerializer
+	{
+
+		class FNetSerializerRegistryDelegates final : private UE::Net::FNetSerializerRegistryDelegates
+		{
+		public:
+			virtual ~FNetSerializerRegistryDelegates();
+
+		private:
+			virtual void OnPreFreezeNetSerializerRegistry() override;
+			//virtual void OnPostFreezeNetSerializerRegistry() override;
+		};
+
+		inline static FBPVRReplicatedTextureStoreNetSerializer::FNetSerializerRegistryDelegates NetSerializerRegistryDelegates;
+
+
+		// Version is required. 
+		static constexpr uint32 Version = 0;
+
+		struct FQuantizedData
+		{
+			// Store only raw byte data
+			alignas(8) uint8* Data = nullptr;
+			int32 Size = 0;
+		};
+
+		typedef FBPVRReplicatedTextureStore SourceType;
+		typedef FQuantizedData QuantizedType;
+		typedef FBPVRReplicatedTextureStoreNetSerializerConfig ConfigType;
+		inline static const ConfigType DefaultConfig;
+
+		//Set to false when a same value delta compression method is undesirable, for example when the serializer only writes a single bit for the state. 
+		static constexpr bool bUseDefaultDelta = true;
+		// Not doing delta, the majority of the time a single bit (bool) controls the serialization of the entirity
+
+		  // Called to create a "quantized snapshot" of the struct
+		static void Quantize(FNetSerializationContext& Context, const FNetQuantizeArgs& Args)
+		{
+
+			// Actually do the real quantization step here next instead of just in serialize, will save on memory overall
+			const SourceType& Source = *reinterpret_cast<const SourceType*>(Args.Source);
+			QuantizedType& Target = *reinterpret_cast<QuantizedType*>(Args.Target);
+		
+			Target.Size = Source.PackedData.Num();
+			if (Target.Size > 0)
+			{
+				Target.Data = static_cast<uint8*>(FMemory::Malloc(Target.Size));
+				FMemory::Memcpy(Target.Data, Source.PackedData.GetData(), Target.Size);
+			}
+
+		}
+
+		// Called to apply the quantized snapshot back to gameplay memory
+		static void Dequantize(FNetSerializationContext& Context, const FNetDequantizeArgs& Args)
+		{
+			const QuantizedType& Source = *reinterpret_cast<const QuantizedType*>(Args.Source);
+			SourceType& Target = *reinterpret_cast<SourceType*>(Args.Target);
+
+			Target.PackedData.SetNum(Source.Size);
+			if (Source.Size > 0)
+			{
+				FMemory::Memcpy(Target.PackedData.GetData(), Source.Data, Source.Size);
+			}
+		}
+
+		// Serialize into bitstream
+		static void Serialize(FNetSerializationContext& Context, const FNetSerializeArgs& Args)
+		{
+			const QuantizedType& Source = *reinterpret_cast<const QuantizedType*>(Args.Source);
+			FNetBitStreamWriter* Writer = Context.GetBitStreamWriter();
+
+			// Write array size first
+			Writer->WriteBits(Source.Size, sizeof(Source.Size) * 8);
+
+			if (Source.Size > 0)
+			{
+				Writer->WriteBitStream((uint32*)Source.Data, 0, Source.Size * 8)
+			}
+		}
+
+		// Deserialize from bitstream
+		static void Deserialize(FNetSerializationContext& Context, const FNetDeserializeArgs& Args)
+		{
+			QuantizedType& Target = *reinterpret_cast<QuantizedType*>(Args.Target);
+			FNetBitStreamReader* Reader = Context.GetBitStreamReader();
+
+			Target.Size = Reader->ReadBits(sizeof(Target.Size) * 8);
+			Target.Data = static_cast<uint8*>(FMemory::Malloc(Target.Size));
+
+			if (Target.Size > 0)
+			{
+				Target.Data = static_cast<uint8*>(FMemory::Malloc(Target.Size));
+				Reader->ReadBitStream((uint32*)Target.Data, Target.Size * 8);
+			}
+		}
+
+		// Compare two instances to see if they differ
+		static bool IsEqual(FNetSerializationContext& Context, const FNetIsEqualArgs& Args)
+		{
+			if (Args.bStateIsQuantized)
+			{
+				const QuantizedType& QuantizedValue0 = *reinterpret_cast<const QuantizedType*>(Args.Source0);
+				const QuantizedType& QuantizedValue1 = *reinterpret_cast<const QuantizedType*>(Args.Source1);
+				return FPlatformMemory::Memcmp(&QuantizedValue0, &QuantizedValue1, sizeof(QuantizedType)) == 0;
+			}
+			else
+			{
+				const SourceType& L = *reinterpret_cast<const SourceType*>(Args.Source0);
+				const SourceType& R = *reinterpret_cast<const SourceType*>(Args.Source1);
+				return FPlatformMemory::Memcmp(&L, &R, sizeof(SourceType)) == 0;
+			}
+		}
+
+		static void FreeDynamicState(FNetSerializationContext&, const FNetFreeDynamicStateArgs& Args)
+		{
+			QuantizedType& Target = *reinterpret_cast<QuantizedType*>(Args.Source);
+			if (Target.Data)
+			{
+				FMemory::Free(Target.Data);
+				Target.Data = nullptr;
+				Target.Size = 0;
+			}
+		}
+	};
+
+
+	static const FName PropertyNetSerializerRegistry_NAME_FBPVRReplicatedTextureStore("FBPVRReplicatedTextureStore");
+	UE_NET_IMPLEMENT_NAMED_STRUCT_NETSERIALIZER_INFO(PropertyNetSerializerRegistry_NAME_FBPVRReplicatedTextureStore, FBPVRReplicatedTextureStoreNetSerializer);
+
+	FBPVRReplicatedTextureStoreNetSerializer::FNetSerializerRegistryDelegates::~FNetSerializerRegistryDelegates()
+	{
+		UE_NET_UNREGISTER_NETSERIALIZER_INFO(PropertyNetSerializerRegistry_NAME_FBPVRReplicatedTextureStore);
+	}
+
+	void FBPVRReplicatedTextureStoreNetSerializer::FNetSerializerRegistryDelegates::OnPreFreezeNetSerializerRegistry()
+	{
+		UE_NET_REGISTER_NETSERIALIZER_INFO(PropertyNetSerializerRegistry_NAME_FBPVRReplicatedTextureStore);
+	}
+
+
+	UE_NET_IMPLEMENT_SERIALIZER(FBPVRReplicatedTextureStoreNetSerializer);
+}
+*/
