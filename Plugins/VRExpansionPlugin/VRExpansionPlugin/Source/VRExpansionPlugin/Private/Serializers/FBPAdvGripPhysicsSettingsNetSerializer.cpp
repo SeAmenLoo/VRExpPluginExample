@@ -1,96 +1,13 @@
 #include "Serializers/FBPAdvGripPhysicsSettingsNetSerializer.h"
+#include "Serializers/SerializerHelpers.h"
 #include "Iris/Serialization/NetSerializerDelegates.h"
 #include "Iris/Serialization/NetSerializers.h"
 #include "Iris/ReplicationState/PropertyNetSerializerInfoRegistry.h"
 #include "Iris/ReplicationState/ReplicationStateDescriptorBuilder.h"
 
+
 namespace UE::Net
 {
-
-    // -----------------------------------------------------------------------------
-// Fixed-compression helpers for 0–MaxValue floats with BitCount precision
-// 
-// -----------------------------------------------------------------------------
-    static constexpr float MaxValue = 512.0f;
-    static constexpr int NumBits = 17;
-   
-
-    inline void WriteRawFloat(FNetBitStreamWriter* Writer, float Value)
-    {
-        uint32 AsInt;
-        FMemory::Memcpy(&AsInt, &Value, sizeof(uint32));
-        Writer->WriteBits(AsInt, 32);
-    }
-
-    inline float ReadRawFloat(FNetBitStreamReader* Reader)
-    {
-        uint32 AsInt = Reader->ReadBits(32);
-        float Value;
-        FMemory::Memcpy(&Value, &AsInt, sizeof(uint32));
-        return Value;
-    }
-
-    template<int32 MaxValue, uint32 NumBits>
-    uint32 GetCompressedFloat(const float Value)
-    {
-        using Details = TFixedCompressedFloatDetails<MaxValue, NumBits>;
-
-        bool clamp = false;
-        int64 ScaledValue;
-        if (MaxValue > Details::MaxBitValue)
-        {
-            // We have to scale this down
-            const float Scale = float(Details::MaxBitValue) / MaxValue;
-            ScaledValue = FMath::TruncToInt(Scale * Value);
-        }
-        else
-        {
-            // We will scale up to get extra precision. But keep is a whole number preserve whole values
-            constexpr int32 Scale = Details::MaxBitValue / MaxValue;
-            ScaledValue = FMath::RoundToInt(Scale * Value);
-        }
-
-        uint32 Delta = static_cast<uint32>(ScaledValue + Details::Bias);
-
-        if (Delta > Details::MaxDelta)
-        {
-            clamp = true;
-            Delta = static_cast<int32>(Delta) > 0 ? Details::MaxDelta : 0;
-        }
-
-        //Writer->WriteBits(Delta, Details::SerIntMax));
-        //Ar.SerializeInt(Delta, Details::SerIntMax);
-
-        return Delta;
-    }
-
-    template<int32 MaxValue, uint32 NumBits>
-    float GetDecompressedFloat(uint32 Delta)
-    {
-        using Details = TFixedCompressedFloatDetails<MaxValue, NumBits>;
-
-        float Value = 0.0f;
-        //uint32 Delta = Value;
-        //Ar.SerializeInt(Delta, Details::SerIntMax);
-
-        float UnscaledValue = static_cast<float>(static_cast<int32>(Delta) - Details::Bias);
-
-        if constexpr (MaxValue > Details::MaxBitValue)
-        {
-            // We have to scale down, scale needs to be a float:
-            constexpr float InvScale = MaxValue / (float)Details::MaxBitValue;
-            Value = UnscaledValue * InvScale;
-        }
-        else
-        {
-            constexpr int32 Scale = Details::MaxBitValue / MaxValue;
-            constexpr float InvScale = float(1) / (float)Scale;
-
-            Value = UnscaledValue * InvScale;
-        }
-
-        return Value;
-    }
 
     // -----------------------------------------------------------------------------
     // Iris serializer for FBPAdvGripPhysicsSettings
@@ -138,8 +55,8 @@ namespace UE::Net
         inline static const ConfigType DefaultConfig;
 
         /** Set to false when a same value delta compression method is undesirable, for example when the serializer only writes a single bit for the state. */
-        static constexpr bool bUseDefaultDelta = false;
-
+        static constexpr bool bUseDefaultDelta = true;
+        // Not doing delta, the majority of the time a single bit (bool) controls the serialization of the entirity
 
 
         /**
@@ -247,8 +164,8 @@ namespace UE::Net
                 Writer->WriteBool(Source.bUseCustomAngularValues);
                 if (Source.bUseCustomAngularValues)
                 {
-                    WriteRawFloat(Writer, Source.AngularStiffness);
-                    WriteRawFloat(Writer, Source.AngularDamping);
+                    Writer->WriteBits(Source.AngularStiffness, 32);
+                    Writer->WriteBits(Source.AngularDamping, 32);
                 }
             }
         }
@@ -260,7 +177,7 @@ namespace UE::Net
             FNetBitStreamReader* Reader = Context.GetBitStreamReader();
 
             Target.bUsePhysicsSettings = Reader->ReadBool();
-
+            
             if (Target.bUsePhysicsSettings)
             {
                 Target.PhysicsGripLocationSettings = Reader->ReadBits(3);
@@ -274,9 +191,9 @@ namespace UE::Net
 
                 Target.bUseCustomAngularValues = Reader->ReadBool();
                 if (Target.bUseCustomAngularValues)
-                {
-                    Target.AngularStiffness = ReadRawFloat(Reader);
-                    Target.AngularDamping = ReadRawFloat(Reader);
+                {                  
+                    Target.AngularStiffness = Reader->ReadBits(32);
+                    Target.AngularDamping = Reader->ReadBits(32);
                 }
             }
         }
