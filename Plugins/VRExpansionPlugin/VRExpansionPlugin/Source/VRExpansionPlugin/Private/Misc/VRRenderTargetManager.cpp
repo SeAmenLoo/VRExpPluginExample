@@ -1852,6 +1852,10 @@ namespace UE::Net
 
 		struct FQuantizedData
 		{
+			uint32 Width;
+			uint32 Height;
+			uint32 bIsZipped;
+
 			// Store only raw byte data
 			alignas(8) uint8* Data = nullptr;
 			int32 Size = 0;

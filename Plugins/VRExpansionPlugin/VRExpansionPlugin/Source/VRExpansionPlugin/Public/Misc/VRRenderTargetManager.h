@@ -386,8 +386,8 @@ protected:
 	TQueue<FRenderDataStore *> RenderDataQueue;
 
 };
-
 /*
+
 USTRUCT()
 struct FBPVRReplicatedTextureStoreSerializerConfig : public FNetSerializerConfig
 {
@@ -397,4 +397,5 @@ struct FBPVRReplicatedTextureStoreSerializerConfig : public FNetSerializerConfig
 namespace UE::Net
 {
 	UE_NET_DECLARE_SERIALIZER(FBPVRReplicatedTextureStoreNetSerializer, VREXPANSIONPLUGIN_API);
-}*/
+}
+*/
