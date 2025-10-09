@@ -16,6 +16,15 @@
 #include "XRMotionControllerBase.h"
 #include "NavFilters/NavigationQueryFilter.h"
 #include "Misc/EngineNetworkCustomVersion.h"
+
+
+#include "Serializers/SerializerHelpers.h"
+#include "Iris/Serialization/NetSerializerDelegates.h"
+#include "Iris/Serialization/NetSerializers.h"
+#include "Iris/Serialization/PackedVectorNetSerializers.h"
+#include "Iris/ReplicationState/PropertyNetSerializerInfoRegistry.h"
+//#include "Iris/ReplicationState/ReplicationStateDescriptorBuilder.h"
+
 //#include "Runtime/Engine/Private/EnginePrivate.h"
 
 #if WITH_PUSH_MODEL
@@ -1354,4 +1363,244 @@ bool FRepMovementVRCharacter::NetSerialize(FArchive& Ar, class UPackageMap* Map,
 	}
 
 	return true;
+}
+
+
+// IRIS NET SERIALIZERS
+
+namespace UE::Net
+{
+
+	// -----------------------------------------------------------------------------
+	// Iris serializer for FVRReplicatedCapsuleHeight
+	// -----------------------------------------------------------------------------
+	struct FVRReplicatedCapsuleHeightNetSerializer
+	{
+
+		class FNetSerializerRegistryDelegates final : private UE::Net::FNetSerializerRegistryDelegates
+		{
+		public:
+			virtual ~FNetSerializerRegistryDelegates();
+
+		private:
+			virtual void OnPreFreezeNetSerializerRegistry() override;
+			//virtual void OnPostFreezeNetSerializerRegistry() override;
+		};
+
+		inline static FVRReplicatedCapsuleHeightNetSerializer::FNetSerializerRegistryDelegates NetSerializerRegistryDelegates;
+
+
+		/** Version is required. */
+		static constexpr uint32 Version = 0;
+
+		struct alignas(8) FQuantizedData
+		{
+			uint32 CompressedFloat;
+		};
+
+		typedef FVRReplicatedCapsuleHeight SourceType;
+		typedef FQuantizedData QuantizedType;
+		typedef FVRReplicatedCapsuleHeightNetSerializerConfig ConfigType;
+		inline static const ConfigType DefaultConfig;
+
+		/** Set to false when a same value delta compression method is undesirable, for example when the serializer only writes a single bit for the state. */
+		static constexpr bool bUseDefaultDelta = true;
+		// Not doing delta, the majority of the time a single bit (bool) controls the serialization of the entirity
+
+		  // Called to create a "quantized snapshot" of the struct
+		static void Quantize(FNetSerializationContext& Context, const FNetQuantizeArgs& Args)
+		{
+			// Actually do the real quantization step here next instead of just in serialize, will save on memory overall
+			const SourceType& Source = *reinterpret_cast<const SourceType*>(Args.Source);
+			QuantizedType& Target = *reinterpret_cast<QuantizedType*>(Args.Target);
+
+			Target.CompressedFloat = GetCompressedFloat<1024, 18>(Source.CapsuleHeight);
+		}
+
+		// Called to apply the quantized snapshot back to gameplay memory
+		static void Dequantize(FNetSerializationContext& Context, const FNetDequantizeArgs& Args)
+		{
+			const QuantizedType& Source = *reinterpret_cast<const QuantizedType*>(Args.Source);
+			SourceType& Target = *reinterpret_cast<SourceType*>(Args.Target);
+
+			Target.CapsuleHeight = GetDecompressedFloat<1024, 18>(Source.CompressedFloat);
+		}
+
+		// Serialize into bitstream
+		static void Serialize(FNetSerializationContext& Context, const FNetSerializeArgs& Args)
+		{
+			const QuantizedType& Source = *reinterpret_cast<const QuantizedType*>(Args.Source);
+			FNetBitStreamWriter* Writer = Context.GetBitStreamWriter();
+
+			Writer->WriteBits(static_cast<uint32>(Source.CompressedFloat), 18);
+
+		}
+
+		// Deserialize from bitstream
+		static void Deserialize(FNetSerializationContext& Context, const FNetDeserializeArgs& Args)
+		{
+			QuantizedType& Target = *reinterpret_cast<QuantizedType*>(Args.Target);
+			FNetBitStreamReader* Reader = Context.GetBitStreamReader();
+
+			Target.CompressedFloat = Reader->ReadBits(18);
+		}
+
+		// Compare two instances to see if they differ
+		static bool IsEqual(FNetSerializationContext& Context, const FNetIsEqualArgs& Args)
+		{
+			if (Args.bStateIsQuantized)
+			{
+				const QuantizedType& QuantizedValue0 = *reinterpret_cast<const QuantizedType*>(Args.Source0);
+				const QuantizedType& QuantizedValue1 = *reinterpret_cast<const QuantizedType*>(Args.Source1);
+				return FPlatformMemory::Memcmp(&QuantizedValue0, &QuantizedValue1, sizeof(QuantizedType)) == 0;
+			}
+			else
+			{
+				const SourceType& L = *reinterpret_cast<const SourceType*>(Args.Source0);
+				const SourceType& R = *reinterpret_cast<const SourceType*>(Args.Source1);
+
+				return FMath::IsNearlyEqual(L.CapsuleHeight, R.CapsuleHeight);
+			}
+		}
+	};
+
+
+	static const FName PropertyNetSerializerRegistry_NAME_FVRReplicatedCapsuleHeight("VRReplicatedCapsuleHeight");
+	UE_NET_IMPLEMENT_NAMED_STRUCT_NETSERIALIZER_INFO(PropertyNetSerializerRegistry_NAME_FVRReplicatedCapsuleHeight, FVRReplicatedCapsuleHeightNetSerializer);
+
+	FVRReplicatedCapsuleHeightNetSerializer::FNetSerializerRegistryDelegates::~FNetSerializerRegistryDelegates()
+	{
+		UE_NET_UNREGISTER_NETSERIALIZER_INFO(PropertyNetSerializerRegistry_NAME_FVRReplicatedCapsuleHeight);
+	}
+
+	void FVRReplicatedCapsuleHeightNetSerializer::FNetSerializerRegistryDelegates::OnPreFreezeNetSerializerRegistry()
+	{
+		UE_NET_REGISTER_NETSERIALIZER_INFO(PropertyNetSerializerRegistry_NAME_FVRReplicatedCapsuleHeight);
+	}
+
+	UE_NET_IMPLEMENT_SERIALIZER(FVRReplicatedCapsuleHeightNetSerializer);
+
+
+	// -----------------------------------------------------------------------------
+// Iris serializer for FVRSeatedCharacterInfo
+// -----------------------------------------------------------------------------
+	/*struct FVRSeatedCharacterInfoNetSerializer
+	{
+
+		class FNetSerializerRegistryDelegates final : private UE::Net::FNetSerializerRegistryDelegates
+		{
+		public:
+			virtual ~FNetSerializerRegistryDelegates();
+
+		private:
+			virtual void OnPreFreezeNetSerializerRegistry() override;
+			//virtual void OnPostFreezeNetSerializerRegistry() override;
+		};
+
+		inline static FVRSeatedCharacterInfoNetSerializer::FNetSerializerRegistryDelegates NetSerializerRegistryDelegates;
+
+
+		// Version is required. 
+		static constexpr uint32 Version = 0;
+
+		struct alignas(8) FQuantizedData
+		{
+			uint8 bSitting : 1;
+			uint8 bZeroToHead : 1;
+
+			//FTransform_NetQuantize StoredTargetTransform;
+			//TObjectPtr<USceneComponent> SeatParent;
+			uint8 PostSeatedMovementMode;
+
+			// Only if bSitting is true
+			//FTransform_NetQuantize InitialRelCameraTransform;
+			uint32 AllowedRadius; // Flt 256, 16 
+			uint32 AllowedRadiusThreshold; // Flt 256, 16
+
+			//uint8 bIsOverThreshold : 1; // Not Replicated
+			//uint32 CurrentThresholdScaler; // Not Replicated
+		};
+
+		typedef FVRSeatedCharacterInfo SourceType;
+		typedef FQuantizedData QuantizedType;
+		typedef FVRSeatedCharacterInfoNetSerializerConfig ConfigType;
+		inline static const ConfigType DefaultConfig;
+
+		// Set to false when a same value delta compression method is undesirable, for example when the serializer only writes a single bit for the state. 
+		static constexpr bool bUseDefaultDelta = true;
+		// Not doing delta, the majority of the time a single bit (bool) controls the serialization of the entirity
+
+		  // Called to create a "quantized snapshot" of the struct
+		static void Quantize(FNetSerializationContext& Context, const FNetQuantizeArgs& Args)
+		{
+			// Actually do the real quantization step here next instead of just in serialize, will save on memory overall
+			const SourceType& Source = *reinterpret_cast<const SourceType*>(Args.Source);
+			QuantizedType& Target = *reinterpret_cast<QuantizedType*>(Args.Target);
+
+			//Target.CompressedFloat = GetCompressedFloat<1024, 18>(Source.CapsuleHeight);
+		}
+
+		// Called to apply the quantized snapshot back to gameplay memory
+		static void Dequantize(FNetSerializationContext& Context, const FNetDequantizeArgs& Args)
+		{
+			const QuantizedType& Source = *reinterpret_cast<const QuantizedType*>(Args.Source);
+			SourceType& Target = *reinterpret_cast<SourceType*>(Args.Target);
+
+			//Target.CapsuleHeight = GetDecompressedFloat<1024, 18>(Source.CompressedFloat);
+		}
+
+		// Serialize into bitstream
+		static void Serialize(FNetSerializationContext& Context, const FNetSerializeArgs& Args)
+		{
+			const QuantizedType& Source = *reinterpret_cast<const QuantizedType*>(Args.Source);
+			FNetBitStreamWriter* Writer = Context.GetBitStreamWriter();
+
+			//Writer->WriteBits(static_cast<uint32>(Source.CompressedFloat), 18);
+
+		}
+
+		// Deserialize from bitstream
+		static void Deserialize(FNetSerializationContext& Context, const FNetDeserializeArgs& Args)
+		{
+			QuantizedType& Target = *reinterpret_cast<QuantizedType*>(Args.Target);
+			FNetBitStreamReader* Reader = Context.GetBitStreamReader();
+
+			//Target.CompressedFloat = Reader->ReadBits(18);
+		}
+
+		// Compare two instances to see if they differ
+		static bool IsEqual(FNetSerializationContext& Context, const FNetIsEqualArgs& Args)
+		{
+			if (Args.bStateIsQuantized)
+			{
+				const QuantizedType& QuantizedValue0 = *reinterpret_cast<const QuantizedType*>(Args.Source0);
+				const QuantizedType& QuantizedValue1 = *reinterpret_cast<const QuantizedType*>(Args.Source1);
+				return FPlatformMemory::Memcmp(&QuantizedValue0, &QuantizedValue1, sizeof(QuantizedType)) == 0;
+			}
+			else
+			{
+				const SourceType& L = *reinterpret_cast<const SourceType*>(Args.Source0);
+				const SourceType& R = *reinterpret_cast<const SourceType*>(Args.Source1);
+
+				//return FMath::IsNearlyEqual(L.CapsuleHeight, R.CapsuleHeight);
+				return true;
+			}
+		}
+	};
+
+
+	static const FName PropertyNetSerializerRegistry_NAME_FVRSeatedCharacterInfo("VRSeatedCharacterInfo");
+	UE_NET_IMPLEMENT_NAMED_STRUCT_NETSERIALIZER_INFO(PropertyNetSerializerRegistry_NAME_FVRSeatedCharacterInfo, FVRSeatedCharacterInfoNetSerializer);
+
+	FVRSeatedCharacterInfoNetSerializer::FNetSerializerRegistryDelegates::~FNetSerializerRegistryDelegates()
+	{
+		UE_NET_UNREGISTER_NETSERIALIZER_INFO(PropertyNetSerializerRegistry_NAME_FVRSeatedCharacterInfo);
+	}
+
+	void FVRSeatedCharacterInfoNetSerializer::FNetSerializerRegistryDelegates::OnPreFreezeNetSerializerRegistry()
+	{
+		UE_NET_REGISTER_NETSERIALIZER_INFO(PropertyNetSerializerRegistry_NAME_FVRSeatedCharacterInfo);
+	}
+
+	UE_NET_IMPLEMENT_SERIALIZER(FVRSeatedCharacterInfoNetSerializer);*/
 }

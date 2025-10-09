@@ -1,5 +1,8 @@
 #pragma once
 
+#include "CoreMinimal.h"
+
+
 // Helpers for Iris serialization
 
 namespace UE::Net

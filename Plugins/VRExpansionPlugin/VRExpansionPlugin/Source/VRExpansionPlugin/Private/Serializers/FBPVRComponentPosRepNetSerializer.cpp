@@ -19,8 +19,8 @@ namespace UE::Net
         inline static const FVectorNetQuantize10NetSerializerConfig Quantize10SerializerConfig;
         inline static const FVectorNetQuantize100NetSerializerConfig Quantize100SerializerConfig;
 
-        inline static const FNetSerializerConfig* VectorNetQuantizeNetSerializerConfigs[3] = { &Quantize10SerializerConfig, &Quantize100SerializerConfig, nullptr };
-        inline static const FNetSerializer* VectorNetQuantizeNetSerializers[4] = {};
+        inline static const FNetSerializerConfig* VectorNetQuantizeNetSerializerConfigs[2] = { &Quantize10SerializerConfig, &Quantize100SerializerConfig};
+        inline static const FNetSerializer* VectorNetQuantizeNetSerializers[2] = {};
 
 
         class FNetSerializerRegistryDelegates final : private UE::Net::FNetSerializerRegistryDelegates
@@ -45,7 +45,7 @@ namespace UE::Net
         /** Version is required. */
         static constexpr uint32 Version = 0;
 
-        struct /*alignas(8)*/ FQuantizedData
+        struct alignas(8) FQuantizedData
         {
             uint64 Position[4]; // We don't need to store double for tracked device positions, but their forwarded serializer uses it
             uint16 Rotation[3];
