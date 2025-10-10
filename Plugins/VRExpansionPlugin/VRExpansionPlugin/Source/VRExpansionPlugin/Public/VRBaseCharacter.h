@@ -609,7 +609,7 @@ namespace UE::Net
 	UE_NET_DECLARE_SERIALIZER(FVRReplicatedCapsuleHeightNetSerializer, VREXPANSIONPLUGIN_API);
 }
 
-/*
+
 USTRUCT()
 struct FVRSeatedCharacterInfoNetSerializerConfig : public FNetSerializerConfig
 {
@@ -619,4 +619,4 @@ struct FVRSeatedCharacterInfoNetSerializerConfig : public FNetSerializerConfig
 namespace UE::Net
 {
 	UE_NET_DECLARE_SERIALIZER(FVRSeatedCharacterInfoNetSerializer, VREXPANSIONPLUGIN_API);
-}*/
+}

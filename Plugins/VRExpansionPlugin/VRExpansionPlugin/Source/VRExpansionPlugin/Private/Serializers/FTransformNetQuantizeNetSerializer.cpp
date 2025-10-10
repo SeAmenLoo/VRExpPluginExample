@@ -17,8 +17,6 @@ namespace UE::Net
     // -----------------------------------------------------------------------------
     struct FTransformNetQuantizeNetSerializer
     {
-
-        inline static const FVectorNetQuantize10NetSerializerConfig Quantize10SerializerConfig;
         inline static const FVectorNetQuantize100NetSerializerConfig Quantize100SerializerConfig;
 
         inline static const FNetSerializerConfig* VectorNetQuantizeNetSerializerConfig = &Quantize100SerializerConfig;
@@ -46,16 +44,16 @@ namespace UE::Net
         /** Version is required. */
         static constexpr uint32 Version = 0;
 
-        struct alignas(8) FQuantizedData
+        /*struct alignas(8) FQuantizedData
         {
             uint64 Position[4]; // We don't need to store double for tracked device positions, but their forwarded serializer uses it
             uint16 Rotation[3];
             uint64 Scale[4]; // We don't need to store double for tracked device positions, but their forwarded serializer uses it
             uint8 UseHighPrecision : 1;
-        };
+        };*/
 
         typedef FTransform_NetQuantize SourceType;
-        typedef FQuantizedData QuantizedType;
+        typedef FTransformNetQuantizeQuantizedData QuantizedType;
         typedef FTransformNetQuantizeNetSerializerConfig ConfigType;
         inline static const ConfigType DefaultConfig;
 

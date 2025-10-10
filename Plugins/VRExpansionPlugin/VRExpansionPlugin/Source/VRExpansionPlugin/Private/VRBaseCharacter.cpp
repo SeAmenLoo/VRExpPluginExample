@@ -23,6 +23,7 @@
 #include "Iris/Serialization/NetSerializers.h"
 #include "Iris/Serialization/PackedVectorNetSerializers.h"
 #include "Iris/ReplicationState/PropertyNetSerializerInfoRegistry.h"
+#include "Serializers/FTransformNetQuantizeNetSerializer.h"
 //#include "Iris/ReplicationState/ReplicationStateDescriptorBuilder.h"
 
 //#include "Runtime/Engine/Private/EnginePrivate.h"
@@ -1484,13 +1485,27 @@ namespace UE::Net
 	// -----------------------------------------------------------------------------
 // Iris serializer for FVRSeatedCharacterInfo
 // -----------------------------------------------------------------------------
-	/*struct FVRSeatedCharacterInfoNetSerializer
+	struct FVRSeatedCharacterInfoNetSerializer
 	{
+		inline static const FVectorNetQuantize100NetSerializerConfig FTransformQuantizeSerializerConfig;
+		inline static const FObjectPtrNetSerializerConfig ObjectPtrNetSerializerConfig;
+
+		inline static const FNetSerializerConfig* FTransformQuantizeSerializerConfigPtr = &FTransformQuantizeSerializerConfig;
+		inline static const FNetSerializer* FTransformQuantizeNetSerializerPtr;
+
+		inline static const FNetSerializerConfig* FObjectPtrSerializerConfigPtr = &ObjectPtrNetSerializerConfig;
+		inline static const FNetSerializer* FObjectPtrNetSerializerPtr;
 
 		class FNetSerializerRegistryDelegates final : private UE::Net::FNetSerializerRegistryDelegates
 		{
 		public:
 			virtual ~FNetSerializerRegistryDelegates();
+
+			void InitNetSerializer()
+			{
+				FVRSeatedCharacterInfoNetSerializer::FTransformQuantizeNetSerializerPtr = &UE_NET_GET_SERIALIZER(FTransformNetQuantizeNetSerializer);
+				FVRSeatedCharacterInfoNetSerializer::FObjectPtrNetSerializerPtr = &UE_NET_GET_SERIALIZER(FObjectPtrNetSerializer);
+			}
 
 		private:
 			virtual void OnPreFreezeNetSerializerRegistry() override;
@@ -1508,12 +1523,12 @@ namespace UE::Net
 			uint8 bSitting : 1;
 			uint8 bZeroToHead : 1;
 
-			//FTransform_NetQuantize StoredTargetTransform;
-			//TObjectPtr<USceneComponent> SeatParent;
+			FTransformNetQuantizeQuantizedData StoredTargetTransform;
+			FObjectNetSerializerQuantizedReferenceStorage SeatParent;
 			uint8 PostSeatedMovementMode;
 
 			// Only if bSitting is true
-			//FTransform_NetQuantize InitialRelCameraTransform;
+			FTransformNetQuantizeQuantizedData InitialRelCameraTransform;
 			uint32 AllowedRadius; // Flt 256, 16 
 			uint32 AllowedRadiusThreshold; // Flt 256, 16
 
@@ -1528,7 +1543,7 @@ namespace UE::Net
 
 		// Set to false when a same value delta compression method is undesirable, for example when the serializer only writes a single bit for the state. 
 		static constexpr bool bUseDefaultDelta = true;
-		// Not doing delta, the majority of the time a single bit (bool) controls the serialization of the entirity
+		// TODO: This is actually a struct that could use some delta serialization implementations.
 
 		  // Called to create a "quantized snapshot" of the struct
 		static void Quantize(FNetSerializationContext& Context, const FNetQuantizeArgs& Args)
@@ -1537,7 +1552,48 @@ namespace UE::Net
 			const SourceType& Source = *reinterpret_cast<const SourceType*>(Args.Source);
 			QuantizedType& Target = *reinterpret_cast<QuantizedType*>(Args.Target);
 
-			//Target.CompressedFloat = GetCompressedFloat<1024, 18>(Source.CapsuleHeight);
+			Target.bSitting = Source.bSitting;
+			Target.bZeroToHead = Source.bZeroToHead;
+			
+			const FNetSerializer* Serializer = FTransformQuantizeNetSerializerPtr;
+			const FNetSerializerConfig* SerializerConfig = FTransformQuantizeSerializerConfigPtr;
+
+			//FTransformNetQuantizeQuantizedData StoredTargetTransform;
+			FNetQuantizeArgs MemberArgs = Args;
+			MemberArgs.NetSerializerConfig = NetSerializerConfigParam(SerializerConfig);
+			MemberArgs.Source = NetSerializerValuePointer(&Source.StoredTargetTransform);
+			MemberArgs.Target = NetSerializerValuePointer(&Target.StoredTargetTransform);
+			Serializer->Quantize(Context, MemberArgs);
+
+
+			// Only if bSitting is true
+			//FTransformNetQuantizeQuantizedData InitialRelCameraTransform;
+			//uint32 AllowedRadius; // Flt 256, 16 
+			//uint32 AllowedRadiusThreshold; // Flt 256, 16
+
+			if (Source.bSitting)
+			{
+				// Initial relative transform doesn't need to be touched or set if not bsitting
+				MemberArgs.Source = NetSerializerValuePointer(&Source.InitialRelCameraTransform);
+				MemberArgs.Target = NetSerializerValuePointer(&Target.InitialRelCameraTransform);
+				Serializer->Quantize(Context, MemberArgs);
+
+				Target.AllowedRadius = GetCompressedFloat<256,16>(Source.AllowedRadius);
+				Target.AllowedRadiusThreshold = GetCompressedFloat<256, 16>(Source.AllowedRadiusThreshold);
+			}
+
+			const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
+			const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
+
+			//FObjectNetSerializerQuantizedReferenceStorage SeatParent;
+			FNetQuantizeArgs MemberArgsObj = Args;
+			MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
+			MemberArgsObj.Source = NetSerializerValuePointer(&Source.SeatParent);
+			MemberArgsObj.Target = NetSerializerValuePointer(&Target.SeatParent);
+			ObjSerializer->Quantize(Context, MemberArgsObj);
+
+			// Store full 8 bits
+			Target.PostSeatedMovementMode = (uint8)Source.PostSeatedMovementMode;
 		}
 
 		// Called to apply the quantized snapshot back to gameplay memory
@@ -1546,7 +1602,48 @@ namespace UE::Net
 			const QuantizedType& Source = *reinterpret_cast<const QuantizedType*>(Args.Source);
 			SourceType& Target = *reinterpret_cast<SourceType*>(Args.Target);
 
-			//Target.CapsuleHeight = GetDecompressedFloat<1024, 18>(Source.CompressedFloat);
+			Target.bSitting = Source.bSitting != 0;
+			Target.bZeroToHead = Source.bZeroToHead != 0;
+
+			const FNetSerializer* Serializer = FTransformQuantizeNetSerializerPtr;
+			const FNetSerializerConfig* SerializerConfig = FTransformQuantizeSerializerConfigPtr;
+
+			//FTransformNetQuantizeQuantizedData StoredTargetTransform;
+			FNetDequantizeArgs MemberArgs = Args;
+			MemberArgs.NetSerializerConfig = NetSerializerConfigParam(SerializerConfig);
+			MemberArgs.Source = NetSerializerValuePointer(&Source.StoredTargetTransform);
+			MemberArgs.Target = NetSerializerValuePointer(&Target.StoredTargetTransform);
+			Serializer->Dequantize(Context, MemberArgs);
+
+
+			// Only if bSitting is true
+			//FTransformNetQuantizeQuantizedData InitialRelCameraTransform;
+			//uint32 AllowedRadius; // Flt 256, 16 
+			//uint32 AllowedRadiusThreshold; // Flt 256, 16
+
+			if (Target.bSitting != 0)
+			{
+				// Initial relative transform doesn't need to be touched or set if not bsitting
+				MemberArgs.Source = NetSerializerValuePointer(&Source.InitialRelCameraTransform);
+				MemberArgs.Target = NetSerializerValuePointer(&Target.InitialRelCameraTransform);
+				Serializer->Dequantize(Context, MemberArgs);
+
+				Target.AllowedRadius = GetDecompressedFloat<256, 16>(Source.AllowedRadius);
+				Target.AllowedRadiusThreshold = GetDecompressedFloat<256, 16>(Source.AllowedRadiusThreshold);
+			}
+
+			const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
+			const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
+
+			//FObjectNetSerializerQuantizedReferenceStorage SeatParent;
+			FNetDequantizeArgs MemberArgsObj = Args;
+			MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
+			MemberArgsObj.Source = NetSerializerValuePointer(&Source.SeatParent);
+			MemberArgsObj.Target = NetSerializerValuePointer(&Target.SeatParent);
+			ObjSerializer->Dequantize(Context, MemberArgsObj);
+
+			// Store full 8 bits
+			Target.PostSeatedMovementMode = (EVRConjoinedMovementModes)Source.PostSeatedMovementMode;
 		}
 
 		// Serialize into bitstream
@@ -1555,8 +1652,40 @@ namespace UE::Net
 			const QuantizedType& Source = *reinterpret_cast<const QuantizedType*>(Args.Source);
 			FNetBitStreamWriter* Writer = Context.GetBitStreamWriter();
 
-			//Writer->WriteBits(static_cast<uint32>(Source.CompressedFloat), 18);
+			Writer->WriteBits(static_cast<uint32>(Source.bSitting), 1);
+			Writer->WriteBits(static_cast<uint32>(Source.bZeroToHead), 1);
 
+			const FNetSerializer* Serializer = FTransformQuantizeNetSerializerPtr;
+			const FNetSerializerConfig* SerializerConfig = FTransformQuantizeSerializerConfigPtr;
+
+			//FTransformNetQuantizeQuantizedData StoredTargetTransform;
+			FNetSerializeArgs MemberArgs = Args;
+			MemberArgs.NetSerializerConfig = NetSerializerConfigParam(SerializerConfig);
+			MemberArgs.Source = NetSerializerValuePointer(&Source.StoredTargetTransform);
+			Serializer->Serialize(Context, MemberArgs);
+
+
+			if (Source.bSitting != 0)
+			{
+				// Initial relative transform doesn't need to be touched or set if not bsitting
+				MemberArgs.NetSerializerConfig = NetSerializerConfigParam(SerializerConfig);
+				MemberArgs.Source = NetSerializerValuePointer(&Source.InitialRelCameraTransform);
+				Serializer->Serialize(Context, MemberArgs);
+
+				Writer->WriteBits(static_cast<uint32>(Source.AllowedRadius), 16);
+				Writer->WriteBits(static_cast<uint32>(Source.AllowedRadiusThreshold), 16);
+			}
+
+			const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
+			const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
+
+			//FObjectNetSerializerQuantizedReferenceStorage SeatParent;
+			FNetSerializeArgs MemberArgsObj = Args;
+			MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
+			MemberArgsObj.Source = NetSerializerValuePointer(&Source.SeatParent);
+			ObjSerializer->Serialize(Context, MemberArgsObj);
+
+			Writer->WriteBits(static_cast<uint32>(Source.PostSeatedMovementMode), 8);
 		}
 
 		// Deserialize from bitstream
@@ -1565,7 +1694,40 @@ namespace UE::Net
 			QuantizedType& Target = *reinterpret_cast<QuantizedType*>(Args.Target);
 			FNetBitStreamReader* Reader = Context.GetBitStreamReader();
 
-			//Target.CompressedFloat = Reader->ReadBits(18);
+			Target.bSitting = Reader->ReadBits(1) != 0;
+			Target.bZeroToHead = Reader->ReadBits(1) != 0;
+
+			const FNetSerializer* Serializer = FTransformQuantizeNetSerializerPtr;
+			const FNetSerializerConfig* SerializerConfig = FTransformQuantizeSerializerConfigPtr;
+
+			//FTransformNetQuantizeQuantizedData StoredTargetTransform;
+			FNetDeserializeArgs MemberArgs = Args;
+			MemberArgs.NetSerializerConfig = NetSerializerConfigParam(SerializerConfig);
+			MemberArgs.Target = NetSerializerValuePointer(&Target.StoredTargetTransform);
+			Serializer->Deserialize(Context, MemberArgs);
+
+
+			if (Target.bSitting != 0)
+			{
+				// Initial relative transform doesn't need to be touched or set if not bsitting
+				MemberArgs.NetSerializerConfig = NetSerializerConfigParam(SerializerConfig);
+				MemberArgs.Target = NetSerializerValuePointer(&Target.InitialRelCameraTransform);
+				Serializer->Deserialize(Context, MemberArgs);
+
+				Target.AllowedRadius = Reader->ReadBits(16);
+				Target.AllowedRadiusThreshold = Reader->ReadBits(16);
+			}
+
+			const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
+			const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
+
+			//FObjectNetSerializerQuantizedReferenceStorage SeatParent;
+			FNetDeserializeArgs MemberArgsObj = Args;
+			MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
+			MemberArgsObj.Target = NetSerializerValuePointer(&Target.SeatParent);
+			ObjSerializer->Deserialize(Context, MemberArgsObj);
+
+			Target.PostSeatedMovementMode = Reader->ReadBits(8);
 		}
 
 		// Compare two instances to see if they differ
@@ -1582,9 +1744,44 @@ namespace UE::Net
 				const SourceType& L = *reinterpret_cast<const SourceType*>(Args.Source0);
 				const SourceType& R = *reinterpret_cast<const SourceType*>(Args.Source1);
 
-				//return FMath::IsNearlyEqual(L.CapsuleHeight, R.CapsuleHeight);
+				if (L.bSitting != R.bSitting) return false;
+				if (L.SeatParent != R.SeatParent) return false;
+				if(!FMath::IsNearlyEqual(L.AllowedRadius, R.AllowedRadius)) return false;
+				if (!FMath::IsNearlyEqual(L.AllowedRadiusThreshold, R.AllowedRadiusThreshold)) return false;
+				if (L.bZeroToHead != R.bZeroToHead) return false;
+				if (!L.StoredTargetTransform.Equals(R.StoredTargetTransform)) return false;
+
+				if (L.bSitting && !L.InitialRelCameraTransform.Equals(R.InitialRelCameraTransform)) return false;
+
 				return true;
 			}
+		}
+
+		static void Apply(FNetSerializationContext&, const FNetApplyArgs& Args)
+		{
+			const SourceType& Source = *reinterpret_cast<const SourceType*>(Args.Source);
+			SourceType& Target = *reinterpret_cast<SourceType*>(Args.Target);
+
+			Target.bSitting = Source.bSitting;
+			Target.bZeroToHead = Source.bZeroToHead;
+			Target.StoredTargetTransform = Source.StoredTargetTransform;
+
+			if (Target.bSitting)
+			{
+				Target.InitialRelCameraTransform = Source.InitialRelCameraTransform;
+				Target.AllowedRadius = Source.AllowedRadius;
+				Target.AllowedRadiusThreshold = Source.AllowedRadiusThreshold;
+			}
+			else
+			{
+				// Clear non repped values
+				Target.InitialRelCameraTransform = FTransform::Identity;
+				Target.AllowedRadius = 0.0f;
+				Target.AllowedRadiusThreshold = 0.0f;
+			}
+
+			Target.SeatParent = Source.SeatParent;
+			Target.PostSeatedMovementMode = Source.PostSeatedMovementMode;
 		}
 	};
 
@@ -1599,8 +1796,9 @@ namespace UE::Net
 
 	void FVRSeatedCharacterInfoNetSerializer::FNetSerializerRegistryDelegates::OnPreFreezeNetSerializerRegistry()
 	{
+		InitNetSerializer();
 		UE_NET_REGISTER_NETSERIALIZER_INFO(PropertyNetSerializerRegistry_NAME_FVRSeatedCharacterInfo);
 	}
 
-	UE_NET_IMPLEMENT_SERIALIZER(FVRSeatedCharacterInfoNetSerializer);*/
+	UE_NET_IMPLEMENT_SERIALIZER(FVRSeatedCharacterInfoNetSerializer);
 }
