@@ -232,7 +232,7 @@ namespace UE::Net
     };
 
 
-	static const FName PropertyNetSerializerRegistry_NAME_TransformNetQuantize("TransformNetQuantize");
+	static const FName PropertyNetSerializerRegistry_NAME_TransformNetQuantize("Transform_NetQuantize");
 	UE_NET_IMPLEMENT_NAMED_STRUCT_NETSERIALIZER_INFO(PropertyNetSerializerRegistry_NAME_TransformNetQuantize, FTransformNetQuantizeNetSerializer);
 
 	FTransformNetQuantizeNetSerializer::FNetSerializerRegistryDelegates::~FNetSerializerRegistryDelegates()
@@ -245,10 +245,6 @@ namespace UE::Net
         InitNetSerializer();
 		UE_NET_REGISTER_NETSERIALIZER_INFO(PropertyNetSerializerRegistry_NAME_TransformNetQuantize);
 	}
-
-	/*void FTransformNetQuantizeNetSerializer::FNetSerializerRegistryDelegates::OnPostFreezeNetSerializerRegistry()
-	{
-	}*/
 
     UE_NET_IMPLEMENT_SERIALIZER(FTransformNetQuantizeNetSerializer);
 }
