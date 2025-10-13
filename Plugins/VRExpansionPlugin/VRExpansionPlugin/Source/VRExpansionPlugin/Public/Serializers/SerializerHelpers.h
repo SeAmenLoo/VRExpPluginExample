@@ -5,8 +5,21 @@
 
 // Helpers for Iris serialization
 
+
+
+
 namespace UE::Net
 {
+	// Quantized type of the array property, keep up to date
+	struct FVRArrayQuantizedType
+	{
+		// How many elements the current allocation can hold.
+		uint16 ElementCapacityCount;
+		// How many elements are valid
+		uint16 ElementCount;
+		void* ElementStorage;
+	};
+
 	// -----------------------------------------------------------------------------
 	// Fixed-compression helpers for 0–MaxValue floats with BitCount precision
 	// Epic doesn't have per float compression helpers yet for Iris serializers

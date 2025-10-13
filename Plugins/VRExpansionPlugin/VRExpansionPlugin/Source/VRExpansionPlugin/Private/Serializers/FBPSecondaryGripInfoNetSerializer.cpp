@@ -79,6 +79,8 @@ namespace UE::Net
 		// TODO: This is actually a struct that could use some delta serialization implementations.
         /** Set to false when a same value delta compression method is undesirable, for example when the serializer only writes a single bit for the state. */
         static constexpr bool bUseDefaultDelta = true;
+		static constexpr bool bHasDynamicState = true;
+		//static constexpr bool bHasCustomNetReference = true;
 
           // Called to create a "quantized snapshot" of the struct
 		static void Quantize(FNetSerializationContext& Context, const FNetQuantizeArgs& Args)
@@ -311,6 +313,7 @@ namespace UE::Net
 
 		static void CloneDynamicState(FNetSerializationContext& Context, const FNetCloneDynamicStateArgs& Args)
 		{
+			const QuantizedType* Source = reinterpret_cast<const QuantizedType*>(Args.Source);
 			QuantizedType& Target = *reinterpret_cast<QuantizedType*>(Args.Target);
 
 			const FNetSerializer* NameSerializer = FNameNetSerializerPtr;
@@ -319,7 +322,19 @@ namespace UE::Net
 			FNetCloneDynamicStateArgs MemberArgs = Args;
 			MemberArgs.NetSerializerConfig = NetSerializerConfigParam(NameSerializerConfig);
 			MemberArgs.Target = NetSerializerValuePointer(&Target.SecondarySlotName);
+			MemberArgs.Source = NetSerializerValuePointer(&Source->SecondarySlotName);
 			NameSerializer->CloneDynamicState(Context, MemberArgs);
+
+
+
+			const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
+			const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
+
+			FNetCloneDynamicStateArgs ObjMemberArgs = Args;
+			ObjMemberArgs.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
+			ObjMemberArgs.Target = NetSerializerValuePointer(&Target.SecondaryAttachment);
+			ObjMemberArgs.Source = NetSerializerValuePointer(&Source->SecondaryAttachment);
+			ObjSerializer->CloneDynamicState(Context, MemberArgs);
 		}
 
 		static void FreeDynamicState(FNetSerializationContext& Context, const FNetFreeDynamicStateArgs& Args)
@@ -333,6 +348,15 @@ namespace UE::Net
 			MemberArgs.NetSerializerConfig = NetSerializerConfigParam(NameSerializerConfig);
 			MemberArgs.Source = NetSerializerValuePointer(&Source.SecondarySlotName);
 			NameSerializer->FreeDynamicState(Context, MemberArgs);
+
+
+			const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
+			const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
+
+			FNetFreeDynamicStateArgs ObjMemberArgs = Args;
+			ObjMemberArgs.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
+			ObjMemberArgs.Source = NetSerializerValuePointer(&Source.SecondaryAttachment);
+			ObjSerializer->FreeDynamicState(Context, MemberArgs);
 		}
 
 		static void Apply(FNetSerializationContext&, const FNetApplyArgs& Args)
@@ -366,6 +390,18 @@ namespace UE::Net
 			//float curLerp;
 			//FVector LastRelativeLocation;
 		}
+
+		/*static void CollectNetReferences(FNetSerializationContext& Context, const FNetCollectReferencesArgs& Args)
+		{
+			const QuantizedType& Source = *reinterpret_cast<const QuantizedType*>(Args.Source);
+			const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
+			const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
+
+			FNetCollectReferencesArgs CollectNetReferencesArgs = Args;
+			CollectNetReferencesArgs.NetSerializerConfig = FObjectPtrSerializerConfigPtr;
+			CollectNetReferencesArgs.Source = NetSerializerValuePointer(&Source.SecondaryAttachment);
+			ObjSerializer->CollectNetReferences(Context, CollectNetReferencesArgs);
+		}*/
     };
 
 
