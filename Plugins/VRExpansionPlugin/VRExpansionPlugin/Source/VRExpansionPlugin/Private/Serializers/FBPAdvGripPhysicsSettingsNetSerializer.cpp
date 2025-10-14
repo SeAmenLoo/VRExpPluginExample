@@ -41,7 +41,7 @@ namespace UE::Net
             uint32 bUseCustomAngularValues : 1;
             uint32 Reserved : 25; // pad out to full 32 bits 
 
-            // Quantized ranges (0–512 with ~0.01 precision)
+            // Quantized ranges (0â€“512 with ~0.01 precision)
             uint32 LinearMaxForceCoefficient;
             uint32 AngularMaxForceCoefficient;
 

@@ -36,7 +36,6 @@
 #include "Templates/IsPODType.h"
 
 #include "Iris/Serialization/SoftObjectNetSerializers.h"
-
 #include "Iris/Serialization/NetSerializerArrayStorage.h"
 
 namespace RLE_Funcs
@@ -1992,9 +1991,17 @@ namespace UE::Net
 
 	struct alignas(8)  FQuantizedTriData
 	{
-		float P1[2];
-		float P2[2];
-		float P3[2];
+		uint16 P1[2];
+		uint16 P2[2];
+		uint16 P3[2];
+	};
+
+	// TODO check on this if it changes over time.....
+	// Really needs to be a macro for getting struct sizes outside of the private files....
+	struct FQuantizedSoftObjectRef
+	{
+		alignas(8) uint8 Storage[64]; // Iris’ FSoftObjectNetSerializerQuantizedType is 48 bytes
+		// Keeping some overhead
 	};
 
 	struct alignas(8)  FQuantizedRenderManagerOperationData
@@ -2002,19 +2009,16 @@ namespace UE::Net
 		uint32 OwnerID;
 		uint8 OperationType;
 		uint32 Color;
-		float P1[2];
-		float P2[2];
+		uint16 P1[2];
+		uint16 P2[2];
 		uint32 Thickness;
 
 		typedef FNetSerializerArrayStorage<FQuantizedTriData> TriStorage;
 		TriStorage Tris;
 
 		//String data
-		FObjectNetSerializerQuantizedReferenceStorage Texture;
-		FObjectNetSerializerQuantizedReferenceStorage Material;
-		// Prob needs dedicated soft object handler
-		//TSoftObjectPtr<UTexture2D> Texture;
-		//TSoftObjectPtr<UMaterial> Material;
+		FQuantizedSoftObjectRef Texture;
+		FQuantizedSoftObjectRef Material;
 	};
 }
 
@@ -2028,7 +2032,7 @@ namespace UE::Net
 	// -----------------------------------------------------------------------------
 	struct FRenderManagerOperationNetSerializer
 	{
-		inline static const FObjectPtrNetSerializerConfig ObjectPtrNetSerializerConfig;
+		inline static const FSoftObjectNetSerializerConfig ObjectPtrNetSerializerConfig;
 
 		inline static const FNetSerializerConfig* FObjectPtrSerializerConfigPtr = &ObjectPtrNetSerializerConfig;
 		inline static const FNetSerializer* FObjectPtrNetSerializerPtr;
@@ -2049,7 +2053,7 @@ namespace UE::Net
 
 			void InitNetSerializer()
 			{
-				FRenderManagerOperationNetSerializer::FObjectPtrNetSerializerPtr = &UE_NET_GET_SERIALIZER(FObjectPtrNetSerializer);
+				FRenderManagerOperationNetSerializer::FObjectPtrNetSerializerPtr = &UE_NET_GET_SERIALIZER(FSoftObjectNetSerializer);
 			}
 
 		private:
@@ -2074,48 +2078,87 @@ namespace UE::Net
 			Target.OwnerID = Source.OwnerID;
 			Target.OperationType = (uint8)Source.OperationType;
 
-			uint8* ColorPtr = ((uint8*) &Target.Color);
-			ColorPtr[0] = Source.Color.R;
-			ColorPtr[1] = Source.Color.G;
-			ColorPtr[2] = Source.Color.B;
-			ColorPtr[3] = Source.Color.A;
-			Target.Thickness = Source.Thickness;
 
-			Target.P1[0] = Source.P1.X;
-			Target.P1[1] = Source.P1.Y;
-			Target.P2[0] = Source.P2.X;
-			Target.P2[1] = Source.P2.Y;
-
-			// ObjectPtr
-			const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
-			const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
-
-			//Target.Material
-			FNetQuantizeArgs MemberArgsObj = Args;
-			MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
-			MemberArgsObj.Source = NetSerializerValuePointer(&Source.Material);
-			MemberArgsObj.Target = NetSerializerValuePointer(&Target.Material);
-			ObjSerializer->Quantize(Context, MemberArgsObj);
-
-			//Target.Texture
-			MemberArgsObj = Args;
-			MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
-			MemberArgsObj.Source = NetSerializerValuePointer(&Source.Texture);
-			MemberArgsObj.Target = NetSerializerValuePointer(&Target.Texture);
-			ObjSerializer->Quantize(Context, MemberArgsObj);
-		
-			Target.Tris.AdjustSize(Context, Source.Tris.Num());
-			FQuantizedTriData* TargetTriData = Target.Tris.GetData();
-
-			if (Target.Tris.Num() > 0)
+			switch ((ERenderManagerOperationType)Source.OperationType)
 			{
-				for (uint32 i = 0; i < Target.Tris.Num(); ++i)
+			case ERenderManagerOperationType::Op_LineDraw:
+			{
+				// Color
+				uint8* ColorPtr = ((uint8*)&Target.Color);
+				ColorPtr[0] = Source.Color.R;
+				ColorPtr[1] = Source.Color.G;
+				ColorPtr[2] = Source.Color.B;
+				ColorPtr[3] = Source.Color.A;
+
+				// Thickness
+				Target.Thickness = Source.Thickness;
+
+				//P 1  1, 20
+				//P 2  2, 20
+				Target.P1[0] = (uint16)GetCompressedFloat<10000, 16>(Source.P1.X);
+				Target.P1[1] = (uint16)GetCompressedFloat<10000, 16>(Source.P1.Y);
+				Target.P2[0] = (uint16)GetCompressedFloat<10000, 16>(Source.P2.X);
+				Target.P2[1] = (uint16)GetCompressedFloat<10000, 16>(Source.P2.Y);
+
+			}break;
+
+			case ERenderManagerOperationType::Op_TexDraw:
+			{
+				// Texture
+				const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
+				const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
+
+				//Target.Texture
+				FNetQuantizeArgs MemberArgsObj = Args;
+				MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
+				MemberArgsObj.Source = NetSerializerValuePointer(&Source.Texture);
+				MemberArgsObj.Target = NetSerializerValuePointer(&Target.Texture);
+				ObjSerializer->Quantize(Context, MemberArgsObj);
+
+				// P1 1, 20
+				Target.P1[0] = (uint16)GetCompressedFloat<10000, 16>(Source.P1.X);
+				Target.P1[1] = (uint16)GetCompressedFloat<10000, 16>(Source.P1.Y);
+
+			}break;
+
+			case ERenderManagerOperationType::Op_TriDraw:
+			{
+				// Color
+				uint8* ColorPtr = ((uint8*)&Target.Color);
+				ColorPtr[0] = Source.Color.R;
+				ColorPtr[1] = Source.Color.G;
+				ColorPtr[2] = Source.Color.B;
+				ColorPtr[3] = Source.Color.A;
+
+				// Material
+				const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
+				const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
+
+				//Target.Material
+				FNetQuantizeArgs MemberArgsObj = Args;
+				MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
+				MemberArgsObj.Source = NetSerializerValuePointer(&Source.Material);
+				MemberArgsObj.Target = NetSerializerValuePointer(&Target.Material);
+				ObjSerializer->Quantize(Context, MemberArgsObj);
+
+				// Tris
+				Target.Tris.AdjustSize(Context, Source.Tris.Num());
+				FQuantizedTriData* TargetTriData = Target.Tris.GetData();
+
+				if (Target.Tris.Num() > 0)
 				{
-					TargetTriData[i].P1[0] = Source.Tris[i].P1.X;
-					TargetTriData[i].P1[1] = Source.Tris[i].P1.Y;
-					TargetTriData[i].P2[0] = Source.Tris[i].P2.X;
-					TargetTriData[i].P2[1] = Source.Tris[i].P2.Y;
+					for (uint32 i = 0; i < Target.Tris.Num(); ++i)
+					{
+						TargetTriData[i].P1[0] = (uint16)GetCompressedFloat<10000, 16>(Source.Tris[i].P1.X);
+						TargetTriData[i].P1[1] = (uint16)GetCompressedFloat<10000, 16>(Source.Tris[i].P1.Y);
+						TargetTriData[i].P2[0] = (uint16)GetCompressedFloat<10000, 16>(Source.Tris[i].P2.X);
+						TargetTriData[i].P2[1] = (uint16)GetCompressedFloat<10000, 16>(Source.Tris[i].P2.Y);
+						TargetTriData[i].P3[0] = (uint16)GetCompressedFloat<10000, 16>(Source.Tris[i].P3.X);
+						TargetTriData[i].P3[1] = (uint16)GetCompressedFloat<10000, 16>(Source.Tris[i].P3.Y);
+					}
 				}
+
+			}break;
 			}
 		}
 
@@ -2128,51 +2171,90 @@ namespace UE::Net
 			Target.OwnerID = Source.OwnerID;
 			Target.OperationType = (ERenderManagerOperationType)Source.OperationType;
 
-			uint8* ColorPtr = ((uint8*)&Source.Color);
-			Target.Color.R = ColorPtr[0];
-			Target.Color.G = ColorPtr[1];
-			Target.Color.B = ColorPtr[2];
-			Target.Color.A = ColorPtr[3];
-			Target.Thickness = Source.Thickness;
 
-			Target.P1.X = Source.P1[0];
-			Target.P1.Y = Source.P1[1];
-
-			Target.P2.X = Source.P2[0];
-			Target.P2.Y = Source.P2[1];
-
-			// ObjectPtr
-			const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
-			const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
-
-			//Target.Material
-			FNetDequantizeArgs MemberArgsObj = Args;
-			MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
-			MemberArgsObj.Source = NetSerializerValuePointer(&Source.Material);
-			MemberArgsObj.Target = NetSerializerValuePointer(&Target.Material);
-			ObjSerializer->Dequantize(Context, MemberArgsObj);
-
-			//Target.Texture
-			MemberArgsObj = Args;
-			MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
-			MemberArgsObj.Source = NetSerializerValuePointer(&Source.Texture);
-			MemberArgsObj.Target = NetSerializerValuePointer(&Target.Texture);
-			ObjSerializer->Dequantize(Context, MemberArgsObj);
-
-			Target.Tris.Reset(Source.Tris.Num());
-			Target.Tris.AddUninitialized(Source.Tris.Num());
-
-			const FQuantizedTriData* SourceTriData = Source.Tris.GetData();
-
-			if (Target.Tris.Num() > 0)
+			switch ((ERenderManagerOperationType)Source.OperationType)
 			{
-				for (int32 i = 0; i < Target.Tris.Num(); ++i)
+			case ERenderManagerOperationType::Op_LineDraw:
+			{
+				// Color
+				uint8* ColorPtr = ((uint8*)&Source.Color);
+				Target.Color.R = ColorPtr[0];
+				Target.Color.G = ColorPtr[1];
+				Target.Color.B = ColorPtr[2];
+				Target.Color.A = ColorPtr[3];
+
+				// Thickness
+				Target.Thickness = Source.Thickness;
+
+				//P 1  1, 20
+				//P 2  2, 20
+				Target.P1.X = GetDecompressedFloat<10000, 16>(Source.P1[0]);
+				Target.P1.Y = GetDecompressedFloat<10000, 16>(Source.P1[1]);
+
+				Target.P2.X = GetDecompressedFloat<10000, 16>(Source.P2[0]);
+				Target.P2.Y = GetDecompressedFloat<10000, 16>(Source.P2[1]);
+
+			}break;
+
+			case ERenderManagerOperationType::Op_TexDraw:
+			{
+				// Texture
+				const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
+				const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
+
+				//Target.Texture
+				FNetDequantizeArgs MemberArgsObj = Args;
+				MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
+				MemberArgsObj.Source = NetSerializerValuePointer(&Source.Texture);
+				MemberArgsObj.Target = NetSerializerValuePointer(&Target.Texture);
+				ObjSerializer->Dequantize(Context, MemberArgsObj);
+
+				// P1 1, 20
+				Target.P1.X = GetDecompressedFloat<10000, 16>(Source.P1[0]);
+				Target.P1.Y = GetDecompressedFloat<10000, 16>(Source.P1[1]);
+
+			}break;
+			
+			case ERenderManagerOperationType::Op_TriDraw:
+			{
+				// Color
+				uint8* ColorPtr = ((uint8*)&Source.Color);
+				Target.Color.R = ColorPtr[0];
+				Target.Color.G = ColorPtr[1];
+				Target.Color.B = ColorPtr[2];
+				Target.Color.A = ColorPtr[3];
+
+				// Material
+				const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
+				const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
+
+				//Target.Material
+				FNetDequantizeArgs MemberArgsObj = Args;
+				MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
+				MemberArgsObj.Source = NetSerializerValuePointer(&Source.Material);
+				MemberArgsObj.Target = NetSerializerValuePointer(&Target.Material);
+				ObjSerializer->Dequantize(Context, MemberArgsObj);
+
+				// Tris
+				Target.Tris.Reset(Source.Tris.Num());
+				Target.Tris.AddUninitialized(Source.Tris.Num());
+
+				const FQuantizedTriData* SourceTriData = Source.Tris.GetData();
+
+				if (Target.Tris.Num() > 0)
 				{
-					Target.Tris[i].P1.X = SourceTriData[i].P1[0];
-					Target.Tris[i].P1.Y = SourceTriData[i].P1[1];
-					Target.Tris[i].P2.X = SourceTriData[i].P2[0];
-					Target.Tris[i].P2.Y = SourceTriData[i].P2[1];
+					for (int32 i = 0; i < Target.Tris.Num(); ++i)
+					{
+						Target.Tris[i].P1.X = GetDecompressedFloat<10000, 16>(SourceTriData[i].P1[0]);
+						Target.Tris[i].P1.Y = GetDecompressedFloat<10000, 16>(SourceTriData[i].P1[1]);
+						Target.Tris[i].P2.X = GetDecompressedFloat<10000, 16>(SourceTriData[i].P2[0]);
+						Target.Tris[i].P2.Y = GetDecompressedFloat<10000, 16>(SourceTriData[i].P2[1]);
+						Target.Tris[i].P3.X = GetDecompressedFloat<10000, 16>(SourceTriData[i].P3[0]);
+						Target.Tris[i].P3.Y = GetDecompressedFloat<10000, 16>(SourceTriData[i].P3[1]);
+					}
 				}
+
+			}break;
 			}
 		}
 
@@ -2184,38 +2266,80 @@ namespace UE::Net
 
 			Writer->WriteBits(Source.OwnerID, 32);
 			Writer->WriteBits(Source.OperationType, 8);
-			Writer->WriteBits(Source.Color, 32);
-			Writer->WriteBits(Source.Thickness, 32);
 
-			Writer->WriteBits(Source.P1[0], 32);
-			Writer->WriteBits(Source.P1[1], 32);
-			Writer->WriteBits(Source.P2[0], 32);
-			Writer->WriteBits(Source.P2[1], 32);
-
-			// ObjectPtr
-			const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
-			const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
-
-			//Target.Material
-			FNetSerializeArgs MemberArgsObj = Args;
-			MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
-			MemberArgsObj.Source = NetSerializerValuePointer(&Source.Material);
-			ObjSerializer->Serialize(Context, MemberArgsObj);
-
-			//Target.Texture
-			MemberArgsObj = Args;
-			MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
-			MemberArgsObj.Source = NetSerializerValuePointer(&Source.Texture);
-			ObjSerializer->Serialize(Context, MemberArgsObj);
-
-			const FQuantizedTriData* TargetTriData = Source.Tris.GetData();
-
-			uint32 TriSize = Source.Tris.Num();
-			Writer->WriteBits(TriSize, 32);
-
-			if (Source.Tris.Num() > 0)
+			switch ((ERenderManagerOperationType)Source.OperationType)
 			{
-				Writer->WriteBitStream((uint32*)TargetTriData, 0, (Source.Tris.Num() * sizeof(FQuantizedTriData)) * 8);
+			case ERenderManagerOperationType::Op_LineDraw:
+			{
+				// Color
+				Writer->WriteBits(Source.Color, 32);
+
+				// Thickness
+				Writer->WriteBits(Source.Thickness, 32);
+
+				//P 1  1, 20
+				//P 2  2, 20
+				if (Writer->WriteBool(Source.P1[0] != 0)) {Writer->WriteBits(Source.P1[0], 16);}
+				if (Writer->WriteBool(Source.P1[1] != 0)) { Writer->WriteBits(Source.P1[1], 16);}
+				if (Writer->WriteBool(Source.P2[0] != 0)) { Writer->WriteBits(Source.P2[0], 16);}
+				if (Writer->WriteBool(Source.P2[1] != 0)) { Writer->WriteBits(Source.P2[1], 16);}
+
+			}break;
+
+			case ERenderManagerOperationType::Op_TexDraw:
+			{
+				// Texture
+				const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
+				const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
+
+				//Target.Texture
+				FNetSerializeArgs MemberArgsObj = Args;
+				MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
+				MemberArgsObj.Source = NetSerializerValuePointer(&Source.Texture);
+				ObjSerializer->Serialize(Context, MemberArgsObj);
+
+				// P1 1, 20
+				if (Writer->WriteBool(Source.P1[0] != 0)) { Writer->WriteBits(Source.P1[0], 16); }
+				if (Writer->WriteBool(Source.P1[1] != 0)) { Writer->WriteBits(Source.P1[1], 16); }
+
+			}break;
+
+			case ERenderManagerOperationType::Op_TriDraw:
+			{
+				// Color
+				Writer->WriteBits(Source.Color, 32);
+
+				// Material
+				const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
+				const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
+
+				//Target.Material
+				FNetSerializeArgs MemberArgsObj = Args;
+				MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
+				MemberArgsObj.Source = NetSerializerValuePointer(&Source.Material);
+				ObjSerializer->Serialize(Context, MemberArgsObj);
+
+				// Tris
+				const FQuantizedTriData* TargetTriData = Source.Tris.GetData();
+
+				uint32 TriSize = Source.Tris.Num();
+				Writer->WriteBits(TriSize, 32);
+
+				if (Source.Tris.Num() > 0)
+				{
+					for (uint32 i = 0; i < Source.Tris.Num(); ++i)
+					{
+						Writer->WriteBits(TargetTriData[i].P1[0], 16);
+						Writer->WriteBits(TargetTriData[i].P1[1], 16);
+						Writer->WriteBits(TargetTriData[i].P2[0], 16);
+						Writer->WriteBits(TargetTriData[i].P2[1], 16);
+						Writer->WriteBits(TargetTriData[i].P3[0], 16);
+						Writer->WriteBits(TargetTriData[i].P3[1], 16);
+					}
+					//Writer->WriteBitStream((uint32*)TargetTriData, 0, (Source.Tris.Num() * sizeof(FQuantizedTriData)) * 8);
+				}
+
+			}break;
 			}
 		}
 
@@ -2227,38 +2351,80 @@ namespace UE::Net
 
 			Target.OwnerID = Reader->ReadBits(32);
 			Target.OperationType = Reader->ReadBits(8);
-			Target.Color = Reader->ReadBits(32);
-			Target.Thickness = Reader->ReadBits(32);
-			Target.P1[0] = Reader->ReadBits(32);
-			Target.P1[1] = Reader->ReadBits(32);
-			Target.P2[0] = Reader->ReadBits(32);
-			Target.P2[1] = Reader->ReadBits(32);
-
-			// ObjectPtr
-			const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
-			const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
-
-			//Target.Material
-			FNetDeserializeArgs MemberArgsObj = Args;
-			MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
-			MemberArgsObj.Target = NetSerializerValuePointer(&Target.Material);
-			ObjSerializer->Deserialize(Context, MemberArgsObj);
-
-			//Target.Texture
-			MemberArgsObj = Args;
-			MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
-			MemberArgsObj.Target = NetSerializerValuePointer(&Target.Texture);
-			ObjSerializer->Deserialize(Context, MemberArgsObj);
 
 
-			uint32 TriSize = Reader->ReadBits(32);
-			Target.Tris.AdjustSize(Context, TriSize);
-
-			const FQuantizedTriData* TargetTriData = Target.Tris.GetData();
-
-			if (Target.Tris.Num() > 0)
+			switch ((ERenderManagerOperationType)Target.OperationType)
 			{
-				Reader->ReadBitStream((uint32*) & TargetTriData, (TriSize * sizeof(FQuantizedTriData)) * 8);
+			case ERenderManagerOperationType::Op_LineDraw:
+			{
+				// Color
+				Target.Color = Reader->ReadBits(32);
+
+				// Thickness
+				Target.Thickness = Reader->ReadBits(32);
+
+				//P 1  1, 20
+				//P 2  2, 20
+				Target.P1[0] = Reader->ReadBool() ? Reader->ReadBits(16) : 0;
+				Target.P1[1] = Reader->ReadBool() ? Reader->ReadBits(16) : 0;
+				Target.P2[0] = Reader->ReadBool() ? Reader->ReadBits(16) : 0;
+				Target.P2[1] = Reader->ReadBool() ? Reader->ReadBits(16) : 0;
+
+			}break;
+
+			case ERenderManagerOperationType::Op_TexDraw:
+			{
+				// Texture
+				const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
+				const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
+
+				//Target.Texture
+				FNetDeserializeArgs MemberArgsObj = Args;
+				MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
+				MemberArgsObj.Target = NetSerializerValuePointer(&Target.Texture);
+				ObjSerializer->Deserialize(Context, MemberArgsObj);
+
+				// P1 1, 20
+				Target.P1[0] = Reader->ReadBool() ? Reader->ReadBits(16) : 0;
+				Target.P1[1] = Reader->ReadBool() ? Reader->ReadBits(16) : 0;
+
+			}break;
+
+			case ERenderManagerOperationType::Op_TriDraw:
+			{
+				// Color
+				Target.Color = Reader->ReadBits(32);
+
+				// Material
+				const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
+				const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
+
+				//Target.Material
+				FNetDeserializeArgs MemberArgsObj = Args;
+				MemberArgsObj.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
+				MemberArgsObj.Target = NetSerializerValuePointer(&Target.Material);
+				ObjSerializer->Deserialize(Context, MemberArgsObj);
+
+				// Tris
+				uint32 TriSize = Reader->ReadBits(32);
+				Target.Tris.AdjustSize(Context, TriSize);
+
+				FQuantizedTriData* TargetTriData = Target.Tris.GetData();
+
+				if (Target.Tris.Num() > 0)
+				{
+					for (uint32 i = 0; i < TriSize; ++i)
+					{
+						TargetTriData[i].P1[0] = Reader->ReadBits(16);
+						TargetTriData[i].P1[1] = Reader->ReadBits(16);
+						TargetTriData[i].P2[0] = Reader->ReadBits(16);
+						TargetTriData[i].P2[1] = Reader->ReadBits(16);
+						TargetTriData[i].P3[0] = Reader->ReadBits(16);
+						TargetTriData[i].P3[1] = Reader->ReadBits(16);
+					}
+					//Reader->ReadBitStream((uint32*)&TargetTriData, (TriSize * sizeof(FQuantizedTriData)) * 8);
+				}
+			}break;
 			}
 		}
 
@@ -2276,30 +2442,65 @@ namespace UE::Net
 
 			Target->OwnerID = Source->OwnerID;
 			Target->OperationType = Source->OperationType;
-			Target->Color = Source->Color;
-			Target->Thickness = Source->Thickness;
-			Target->P1[0] = Source->P1[0];
-			Target->P1[1] = Source->P1[1];
-			Target->P2[0] = Source->P2[0];
-			Target->P2[1] = Source->P2[1];
 
-			// ObjectPtr
-			const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
-			const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
 
-			FNetCloneDynamicStateArgs ObjMemberArgs = Args;
-			ObjMemberArgs.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
-			ObjMemberArgs.Target = NetSerializerValuePointer(&Target->Material);
-			ObjMemberArgs.Source = NetSerializerValuePointer(&Source->Material);
-			ObjSerializer->CloneDynamicState(Context, ObjMemberArgs);
+			switch ((ERenderManagerOperationType)Target->OperationType)
+			{
+			case ERenderManagerOperationType::Op_LineDraw:
+			{
+				// Color
+				Target->Color = Source->Color;
 
-			ObjMemberArgs = Args;
-			ObjMemberArgs.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
-			ObjMemberArgs.Target = NetSerializerValuePointer(&Target->Texture);
-			ObjMemberArgs.Source = NetSerializerValuePointer(&Source->Texture);
-			ObjSerializer->CloneDynamicState(Context, ObjMemberArgs);
+				// Thickness
+				Target->Thickness = Source->Thickness;
 
-			Target->Tris.Clone(Context, Source->Tris);
+				//P 1  1, 20
+				//P 2  2, 20
+				Target->P1[0] = Source->P1[0];
+				Target->P1[1] = Source->P1[1];
+				Target->P2[0] = Source->P2[0];
+				Target->P2[1] = Source->P2[1];
+
+			}break;
+
+			case ERenderManagerOperationType::Op_TexDraw:
+			{
+				// Texture
+				const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
+				const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
+
+				FNetCloneDynamicStateArgs ObjMemberArgs = Args;
+				ObjMemberArgs.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
+				ObjMemberArgs.Target = NetSerializerValuePointer(&Target->Texture);
+				ObjMemberArgs.Source = NetSerializerValuePointer(&Source->Texture);
+				ObjSerializer->CloneDynamicState(Context, ObjMemberArgs);
+				
+				// P1 1, 20
+				Target->P1[0] = Source->P1[0];
+				Target->P1[1] = Source->P1[1];
+
+			}break;
+
+			case ERenderManagerOperationType::Op_TriDraw:
+			{
+				// Color
+				Target->Color = Source->Color;
+
+				// Material
+				const FNetSerializer* ObjSerializer = FObjectPtrNetSerializerPtr;
+				const FNetSerializerConfig* ObjSerializerConfig = FObjectPtrSerializerConfigPtr;
+
+				FNetCloneDynamicStateArgs ObjMemberArgs = Args;
+				ObjMemberArgs.NetSerializerConfig = NetSerializerConfigParam(ObjSerializerConfig);
+				ObjMemberArgs.Target = NetSerializerValuePointer(&Target->Material);
+				ObjMemberArgs.Source = NetSerializerValuePointer(&Source->Material);
+				ObjSerializer->CloneDynamicState(Context, ObjMemberArgs);
+
+				// Tris
+				Target->Tris.Clone(Context, Source->Tris);
+
+			}break;
+			}
 		}
 
 		static void FreeDynamicState(FNetSerializationContext& Context, const FNetFreeDynamicStateArgs& Args)
