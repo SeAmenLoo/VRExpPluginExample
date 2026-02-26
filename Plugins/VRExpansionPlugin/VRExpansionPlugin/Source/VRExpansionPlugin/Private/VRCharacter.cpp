@@ -193,6 +193,17 @@ void AVRCharacter::ExtendedSimpleMoveToLocation(const FVector& GoalLocation, flo
 	}
 }
 
+void AVRCharacter::ZeroToSeatInformation()
+{
+
+	SetSeatRelativeLocationAndRotationVR(FVector::ZeroVector);
+	NetSmoother->SetRelativeTransform(FTransform(FQuat::Identity, FVector(0.f, 0.f, this->VRRootReference->GetTargetHeightOffset().Z), FVector(1.0f)));
+
+	NotifyOfTeleport();
+	//LeftMotionController->PostTeleportMoveGrippedObjects();
+	//RightMotionController->PostTeleportMoveGrippedObjects();
+}
+
 FVector AVRCharacter::GetTargetHeightOffset()
 {
 	return bRetainRoomscale ? FVector::ZeroVector : VRRootReference->GetTargetHeightOffset();
